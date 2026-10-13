@@ -117,6 +117,12 @@ class MainActivity : ComponentActivity() {
     private var adMobBridge: AdMobBridge? = null
     private var isWebViewLoaded: Boolean = false
     private var pendingFcmNotification: NotificationNavigationData? = null
+    @Volatile
+    var isInputFocusedInWebView: Boolean = false
+
+    fun setInputFocusedFromJs(isFocused: Boolean) {
+        isInputFocusedInWebView = isFocused
+    }
 
     // Native Media3 ExoPlayer components
     private lateinit var playerContainer: FrameLayout
@@ -240,7 +246,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) {
+        if (hasFocus && !isInputFocusedInWebView) {
             applyImmersiveFullScreen()
         }
     }
@@ -1153,7 +1159,8 @@ class MainActivity : ComponentActivity() {
 
     fun applyImmersiveFullScreen() {
         runOnUiThread {
-            // Never re-hide bars while the keyboard is open: it can dismiss the IME and drop focus.
+            // Never re-hide bars while the keyboard is open or user is actively typing/autofilling: it can dismiss the IME and drop focus.
+            if (isInputFocusedInWebView) return@runOnUiThread
             val imeVisible = ViewCompat.getRootWindowInsets(window.decorView)
                 ?.isVisible(WindowInsetsCompat.Type.ime()) == true
             if (imeVisible) return@runOnUiThread
@@ -1175,7 +1182,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        applyImmersiveFullScreen()
+        if (!isInputFocusedInWebView) {
+            applyImmersiveFullScreen()
+        }
         if (playerContainer.visibility == View.VISIBLE) {
             val isLandscape = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
             val density = resources.displayMetrics.density
@@ -1227,6 +1236,11 @@ class MainActivity : ComponentActivity() {
 
         @JavascriptInterface
         fun isAvailable(): Boolean = true
+
+        @JavascriptInterface
+        fun setInputFocused(isFocused: Boolean) {
+            activity.setInputFocusedFromJs(isFocused)
+        }
 
         @JavascriptInterface
         fun isNativePlayerAvailable(): Boolean = true
