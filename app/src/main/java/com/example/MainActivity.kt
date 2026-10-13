@@ -41,6 +41,12 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.CustomCredential
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialCustomException
+import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.GetCredentialInterruptedException
+import androidx.credentials.exceptions.GetCredentialProviderConfigurationException
+import androidx.credentials.exceptions.GetCredentialUnknownException
+import androidx.credentials.exceptions.NoCredentialException
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import androidx.lifecycle.lifecycleScope
@@ -1775,48 +1781,147 @@ class MainActivity : ComponentActivity() {
 
         lifecycleScope.launch {
             try {
+                Log.d(TAG, "Native Google Sign-In: Requesting credentials via CredentialManager with serverClientId=$serverClientId")
                 val result = credentialManager.getCredential(
                     request = request,
                     context = this@MainActivity
                 )
                 val credential = result.credential
-                if (credential is CustomCredential &&
-                    (credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL ||
-                     credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_SIWG_CREDENTIAL)
-                ) {
-                    val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
-                    val idToken = googleIdTokenCredential.idToken
-                    webView.post {
-                        webView.evaluateJavascript(
-                            "if(window.onNativeGoogleSignInSuccess){window.onNativeGoogleSignInSuccess(${JSONObject.quote(idToken)});}",
+                Log.d(TAG, "Native Google Sign-In: Received credential class=${credential.javaClass.name}")
+
+                val idToken: String? = when {
+                    credential is GoogleIdTokenCredential -> {
+                        Log.d(TAG, "Native Google Sign-In: Direct GoogleIdTokenCredential for user=${credential.id}")
+                        credential.idToken
+                    }
+                    credential is CustomCredential &&
+                        (credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL ||
+                         credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_SIWG_CREDENTIAL) -> {
+                        try {
+                            val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
+                            Log.d(TAG, "Native Google Sign-In: Extracted GoogleIdTokenCredential from Bundle for user=${googleIdTokenCredential.id}")
+                            googleIdTokenCredential.idToken
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Native Google Sign-In: Failed to parse GoogleIdTokenCredential from Bundle: ${e.message}", e)
                             null
-                        )
+                        }
+                    }
+                    else -> {
+                        val credType = (credential as? CustomCredential)?.type ?: "unknown"
+                        Log.e(TAG, "Native Google Sign-In: Unsupported credential class=${credential.javaClass.name}, type=$credType")
+                        null
+                    }
+                }
+
+                if (!idToken.isNullOrBlank()) {
+                    Log.d(TAG, "Native Google Sign-In: ID Token obtained successfully (length=${idToken.length}). Dispatching to WebView...")
+                    runOnUiThread {
+                        val jsCode = """
+                            (function() {
+                                try {
+                                    if (typeof window.onNativeGoogleSignInSuccess === 'function') {
+                                        window.onNativeGoogleSignInSuccess(${JSONObject.quote(idToken)});
+                                        return 'ok';
+                                    } else {
+                                        console.error('onNativeGoogleSignInSuccess is not defined on window');
+                                        return 'not_found';
+                                    }
+                                } catch (err) {
+                                    console.error('Error invoking onNativeGoogleSignInSuccess:', err);
+                                    return 'error: ' + err.message;
+                                }
+                            })();
+                        """.trimIndent()
+                        webView.evaluateJavascript(jsCode) { evalRes ->
+                            Log.d(TAG, "Native Google Sign-In: onNativeGoogleSignInSuccess evaluateJavascript response: $evalRes")
+                        }
                     }
                 } else {
-                    webView.post {
-                        webView.evaluateJavascript(
-                            "if(window.onNativeGoogleSignInFailure){window.onNativeGoogleSignInFailure('بيانات تسجيل الدخول غير صالحة');}",
-                            null
-                        )
+                    val failureMsg = "تعذر استخراج رمز التحقق من حساب Google (ID Token)."
+                    Log.e(TAG, "Native Google Sign-In: $failureMsg")
+                    runOnUiThread {
+                        Toast.makeText(this@MainActivity, failureMsg, Toast.LENGTH_SHORT).show()
+                        val jsCode = """
+                            (function() {
+                                try {
+                                    if (typeof window.onNativeGoogleSignInFailure === 'function') {
+                                        window.onNativeGoogleSignInFailure(${JSONObject.quote(failureMsg)});
+                                        return 'ok';
+                                    }
+                                } catch (err) {
+                                    console.error('Error invoking onNativeGoogleSignInFailure:', err);
+                                }
+                            })();
+                        """.trimIndent()
+                        webView.evaluateJavascript(jsCode, null)
                     }
                 }
             } catch (e: GetCredentialCancellationException) {
-                webView.post {
-                    webView.evaluateJavascript(
-                        "if(window.onNativeGoogleSignInFailure){window.onNativeGoogleSignInFailure('تم إلغاء تسجيل الدخول');}",
-                        null
-                    )
+                Log.w(TAG, "Native Google Sign-In: User cancelled the sign-in selector: ${e.message}")
+                runOnUiThread {
+                    val jsCode = """
+                        (function() {
+                            try {
+                                if (typeof window.onNativeGoogleSignInFailure === 'function') {
+                                    window.onNativeGoogleSignInFailure('تم إلغاء تسجيل الدخول');
+                                }
+                            } catch (err) {
+                                console.error('Error invoking onNativeGoogleSignInFailure (cancel):', err);
+                            }
+                        })();
+                    """.trimIndent()
+                    webView.evaluateJavascript(jsCode, null)
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Credential Manager error: ${e.message}", e)
-                val msg = e.localizedMessage ?: "فشل تسجيل الدخول باستخدام Google"
-                webView.post {
-                    webView.evaluateJavascript(
-                        "if(window.onNativeGoogleSignInFailure){window.onNativeGoogleSignInFailure(${JSONObject.quote(msg)});}",
-                        null
-                    )
+            } catch (e: Throwable) {
+                val exceptionName = e.javaClass.simpleName
+                val rawMessage = e.message ?: "Unknown error"
+                Log.e(TAG, "Native Google Sign-In failed [$exceptionName]: $rawMessage", e)
+
+                val userMessage = formatGoogleSignInErrorMessage(e)
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, userMessage, Toast.LENGTH_LONG).show()
+                    val jsCode = """
+                        (function() {
+                            try {
+                                if (typeof window.onNativeGoogleSignInFailure === 'function') {
+                                    window.onNativeGoogleSignInFailure(${JSONObject.quote(userMessage)});
+                                    return 'ok';
+                                } else {
+                                    console.error('onNativeGoogleSignInFailure is not defined on window');
+                                    return 'not_found';
+                                }
+                            } catch (err) {
+                                console.error('Error invoking onNativeGoogleSignInFailure:', err);
+                                return 'error: ' + err.message;
+                            }
+                        })();
+                    """.trimIndent()
+                    webView.evaluateJavascript(jsCode) { evalRes ->
+                        Log.d(TAG, "Native Google Sign-In: onNativeGoogleSignInFailure evaluateJavascript response: $evalRes")
+                    }
                 }
             }
+        }
+    }
+
+    private fun formatGoogleSignInErrorMessage(e: Throwable): String {
+        val rawMsg = e.message ?: ""
+        val className = e.javaClass.simpleName
+        return when {
+            rawMsg.contains("10:") || rawMsg.contains("DEVELOPER_ERROR", ignoreCase = true) ->
+                "خطأ في مطابقة شهادة التطبيق (Developer Error 10): يلزم إضافة بصمة SHA-1 الخاصة بالتطبيق (9C:BB:DC:B9:FC:37:CA:66:1C:49:45:1D:87:E2:8D:2C:CE:C7:6D:CE) واسم الحزمة (com.aistudio.iptvlive.qkxmr) في إعدادات مشروع Firebase Console."
+            rawMsg.contains("16:") || rawMsg.contains("Cannot find a matching credential", ignoreCase = true) ->
+                "تعذر العثور على حساب Google متطابق، أو أن Web Client ID غير متطابق مع هذا المشروع."
+            rawMsg.contains("7:") || rawMsg.contains("NETWORK", ignoreCase = true) ->
+                "خطأ في الاتصال بالإنترنت أثناء التواصل مع خدمات Google Play."
+            rawMsg.contains("12500") ->
+                "فشل تسجيل الدخول من خلال Google Play Services (رمز 12500)."
+            e is GetCredentialProviderConfigurationException ->
+                "مزود المصادقة غير مهيأ بشكل صحيح على الجهاز (ProviderConfigurationException)."
+            e is NoCredentialException ->
+                "لا توجد بيانات اعتماد متاحة لحساب Google في هذا الجهاز."
+            else ->
+                "فشل تسجيل الدخول عبر Google ($className): ${e.localizedMessage ?: "حدث خطأ غير متوقع"}"
         }
     }
 }

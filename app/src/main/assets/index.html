@@ -5287,6 +5287,9 @@ window.showAuthAlert = function(msg, isSuccess = false) {
   box.style.display = "block";
   if (isSuccess) box.classList.add("success");
   else box.classList.remove("success");
+  try {
+    box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (_) {}
 };
 
 window.clearAuthAlert = function() {
@@ -5309,8 +5312,9 @@ function mapAuthErrorCodeToArabic(err) {
       return "صيغة البريد الإلكتروني غير صالحة.";
     case "auth/user-not-found":
     case "auth/wrong-password":
-    case "auth/invalid-credential":
       return "البريد الإلكتروني أو كلمة المرور غير صحيحة.";
+    case "auth/invalid-credential":
+      return "بيانات الاعتماد غير صالحة أو منتهية الصلاحية (Invalid Credential).";
     case "auth/email-already-in-use":
       return "هذا البريد الإلكتروني مسجل بالفعل بحساب آخر.";
     case "auth/weak-password":
@@ -5322,7 +5326,7 @@ function mapAuthErrorCodeToArabic(err) {
     case "auth/user-disabled":
       return "تم تعطيل هذا الحساب من قبل الإدارة.";
     case "auth/operation-not-allowed":
-      return "طريقة تسجيل الدخول هذه غير مفعلة في لوحة تحكم Firebase.";
+      return "تسجيل الدخول باستخدام Google غير مفعّل في لوحة Firebase Console (Authentication ← Sign-in method). يرجى تفعيله أولاً.";
     case "auth/popup-closed-by-user":
       return "تم إغلاق نافذة تسجيل الدخول قبل إتمام العملية.";
     case "auth/popup-blocked":
@@ -5330,7 +5334,7 @@ function mapAuthErrorCodeToArabic(err) {
     case "auth/account-exists-with-different-credential":
       return "يوجد حساب مسجل بالفعل بهذا البريد الإلكتروني ولكن بطريقة تسجيل دخول أخرى.";
     default:
-      return (err && err.message) ? err.message : "حدث خطأ أثناء معالجة الطلب، يرجى المحاولة ثانية.";
+      return (err && err.message) ? ("فشل في عملية تسجيل الدخول: " + err.message) : "حدث خطأ أثناء معالجة الطلب، يرجى المحاولة ثانية.";
   }
 }
 
@@ -5436,12 +5440,26 @@ window.onNativeGoogleSignInSuccess = async function(idToken) {
   const btn = document.getElementById("btnGoogleSignIn");
   if (btn) btn.disabled = false;
   clearAuthAlert();
+
+  if (!idToken || typeof idToken !== "string" || !idToken.trim()) {
+    console.error("onNativeGoogleSignInSuccess: received empty or invalid idToken");
+    showAuthAlert("لم يتم استلام رمز المصادقة (ID Token) لحساب Google.");
+    return;
+  }
+
+  showAuthAlert("تم اختيار الحساب بنجاح، جاري تأكيد المصادقة في Firebase...", true);
   try {
+    if (!auth || typeof signInWithCredential !== "function" || !GoogleAuthProvider) {
+      throw new Error("نظام المصادقة (Firebase Auth) غير مهيأ حالياً.");
+    }
     const credential = GoogleAuthProvider.credential(idToken);
-    await signInWithCredential(auth, credential);
+    const userCredential = await signInWithCredential(auth, credential);
+    console.log("Firebase Google Sign-In success for:", userCredential?.user?.email);
+    clearAuthAlert();
     closeAuthModal();
   } catch (err) {
     console.error("Firebase native credential sign-in error:", err);
+    if (btn) btn.disabled = false;
     showAuthAlert(mapAuthErrorCodeToArabic(err));
   }
 };
@@ -5449,8 +5467,9 @@ window.onNativeGoogleSignInSuccess = async function(idToken) {
 window.onNativeGoogleSignInFailure = function(errorMsg) {
   const btn = document.getElementById("btnGoogleSignIn");
   if (btn) btn.disabled = false;
+  console.warn("Native Google Sign-In failure callback:", errorMsg);
   if (errorMsg === "تم إلغاء تسجيل الدخول") {
-    clearAuthAlert();
+    showAuthAlert("تم إلغاء تسجيل الدخول. يمكنك الضغط مجددًا على زر Google للمحاولة.");
     return;
   }
   showAuthAlert(errorMsg || "تعذر إكمال تسجيل الدخول عبر Google.");
