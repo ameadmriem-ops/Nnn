@@ -2721,12 +2721,12 @@ body.light-mode .account-stat-val {
       <form id="formAuthLogin" onsubmit="handleAuthLoginSubmit(event)" style="display:block">
         <div class="auth-form-group">
           <label class="auth-form-label">البريد الإلكتروني</label>
-          <input type="email" id="loginEmailInput" class="auth-input-modern" placeholder="name@example.com" required autocomplete="email" dir="ltr" style="text-align:right">
+          <input type="email" id="loginEmailInput" name="email" class="auth-input-modern" placeholder="name@example.com" required autocomplete="email" dir="ltr" style="text-align:right">
         </div>
         <div class="auth-form-group">
           <label class="auth-form-label">كلمة المرور</label>
           <div class="auth-input-field-wrap">
-            <input type="password" id="loginPassInput" class="auth-input-modern" placeholder="••••••••" required autocomplete="current-password" dir="ltr" style="text-align:right">
+            <input type="password" id="loginPassInput" name="password" class="auth-input-modern" placeholder="••••••••" required autocomplete="current-password" dir="ltr" style="text-align:right">
             <button type="button" class="auth-eye-btn" onclick="togglePasswordVisibility('loginPassInput', this)">👁️</button>
           </div>
           <div style="text-align:left">
@@ -2742,23 +2742,23 @@ body.light-mode .account-stat-val {
       <form id="formAuthRegister" onsubmit="handleAuthRegisterSubmit(event)" style="display:none">
         <div class="auth-form-group">
           <label class="auth-form-label">الاسم الكامل</label>
-          <input type="text" id="regNameInput" class="auth-input-modern" placeholder="اسمك الكريم" required autocomplete="name">
+          <input type="text" id="regNameInput" name="name" class="auth-input-modern" placeholder="اسمك الكريم" required autocomplete="name">
         </div>
         <div class="auth-form-group">
           <label class="auth-form-label">البريد الإلكتروني</label>
-          <input type="email" id="regEmailInput" class="auth-input-modern" placeholder="name@example.com" required autocomplete="email" dir="ltr" style="text-align:right">
+          <input type="email" id="regEmailInput" name="email" class="auth-input-modern" placeholder="name@example.com" required autocomplete="email" dir="ltr" style="text-align:right">
         </div>
         <div class="auth-form-group">
           <label class="auth-form-label">كلمة المرور (6 أحرف أو أكثر)</label>
           <div class="auth-input-field-wrap">
-            <input type="password" id="regPassInput" class="auth-input-modern" placeholder="••••••••" required autocomplete="new-password" minlength="6" dir="ltr" style="text-align:right">
+            <input type="password" id="regPassInput" name="new-password" class="auth-input-modern" placeholder="••••••••" required autocomplete="new-password" minlength="6" dir="ltr" style="text-align:right">
             <button type="button" class="auth-eye-btn" onclick="togglePasswordVisibility('regPassInput', this)">👁️</button>
           </div>
         </div>
         <div class="auth-form-group">
           <label class="auth-form-label">تأكيد كلمة المرور</label>
           <div class="auth-input-field-wrap">
-            <input type="password" id="regPassConfirmInput" class="auth-input-modern" placeholder="••••••••" required autocomplete="new-password" minlength="6" dir="ltr" style="text-align:right">
+            <input type="password" id="regPassConfirmInput" name="confirm-password" class="auth-input-modern" placeholder="••••••••" required autocomplete="new-password" minlength="6" dir="ltr" style="text-align:right">
             <button type="button" class="auth-eye-btn" onclick="togglePasswordVisibility('regPassConfirmInput', this)">👁️</button>
           </div>
         </div>
@@ -2774,7 +2774,7 @@ body.light-mode .account-stat-val {
         </p>
         <div class="auth-form-group">
           <label class="auth-form-label">البريد الإلكتروني</label>
-          <input type="email" id="resetEmailInput" class="auth-input-modern" placeholder="name@example.com" required autocomplete="email" dir="ltr" style="text-align:right">
+          <input type="email" id="resetEmailInput" name="email" class="auth-input-modern" placeholder="name@example.com" required autocomplete="email" dir="ltr" style="text-align:right">
         </div>
         <button type="submit" id="btnResetSubmit" class="auth-btn-primary">
           <span id="btnResetText">إرسال رابط استعادة كلمة المرور</span>
@@ -5211,18 +5211,21 @@ window.closeAuthModal = function() {
 
 window.handleAuthOverlayClick = function(e) {
   if (e.target && e.target.id === "authModalOverlay") {
+    const active = document.activeElement;
+    if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) {
+      active.blur();
+      return;
+    }
     closeAuthModal();
   }
 };
 
-// Keep the active authentication field visible when Android's soft keyboard resizes the viewport.
+// Ensure input fields are smoothly interactable with soft keyboard and autofill
 document.addEventListener("focusin", function(e) {
   const target = e.target;
   if (!target || !target.matches || !target.matches("#authModalOverlay input, #authModalOverlay textarea")) return;
   target.style.userSelect = "text";
   target.style.webkitUserSelect = "text";
-  const modal = document.querySelector("#authModalOverlay .auth-modal-card");
-  if (modal) modal.scrollTop = Math.max(0, modal.scrollTop);
 }, true);
 
 window.switchAuthTab = function(tab) {
@@ -5326,7 +5329,7 @@ function mapAuthErrorCodeToArabic(err) {
     case "auth/user-disabled":
       return "تم تعطيل هذا الحساب من قبل الإدارة.";
     case "auth/operation-not-allowed":
-      return "تسجيل الدخول باستخدام Google غير مفعّل في لوحة Firebase Console (Authentication ← Sign-in method). يرجى تفعيله أولاً.";
+      return "طريقة المصادقة هذه غير مفعّلة في Firebase Console. يرجى فتح Firebase Console ← Authentication ← Sign-in method والتأكد من تفعيل كل من 'Email/Password' و 'Google'.";
     case "auth/popup-closed-by-user":
       return "تم إغلاق نافذة تسجيل الدخول قبل إتمام العملية.";
     case "auth/popup-blocked":
@@ -5334,7 +5337,7 @@ function mapAuthErrorCodeToArabic(err) {
     case "auth/account-exists-with-different-credential":
       return "يوجد حساب مسجل بالفعل بهذا البريد الإلكتروني ولكن بطريقة تسجيل دخول أخرى.";
     default:
-      return (err && err.message) ? ("فشل في عملية تسجيل الدخول: " + err.message) : "حدث خطأ أثناء معالجة الطلب، يرجى المحاولة ثانية.";
+      return (err && err.message) ? ("فشل في عملية المصادقة: " + err.message) : "حدث خطأ أثناء معالجة الطلب، يرجى المحاولة ثانية.";
   }
 }
 
@@ -5357,6 +5360,7 @@ window.handleAuthLoginSubmit = async function(e) {
   try {
     const cred = await signInWithEmailAndPassword(auth, email, password);
     closeAuthModal();
+    showPage("home");
   } catch (err) {
     console.error("Login error:", err);
     showAuthAlert(mapAuthErrorCodeToArabic(err));
@@ -5398,6 +5402,7 @@ window.handleAuthRegisterSubmit = async function(e) {
       await updateProfile(cred.user, { displayName: name });
     }
     closeAuthModal();
+    showPage("home");
   } catch (err) {
     console.error("Register error:", err);
     showAuthAlert(mapAuthErrorCodeToArabic(err));
@@ -5429,6 +5434,7 @@ window.handleGoogleSignInClick = async function() {
     try {
       await signInWithPopup(auth, provider);
       closeAuthModal();
+      showPage("home");
     } catch (err) {
       console.error("Google sign in error:", err);
       showAuthAlert(mapAuthErrorCodeToArabic(err));
@@ -5457,6 +5463,7 @@ window.onNativeGoogleSignInSuccess = async function(idToken) {
     console.log("Firebase Google Sign-In success for:", userCredential?.user?.email);
     clearAuthAlert();
     closeAuthModal();
+    showPage("home");
   } catch (err) {
     console.error("Firebase native credential sign-in error:", err);
     if (btn) btn.disabled = false;
@@ -5517,6 +5524,11 @@ window.logoutApp = async function() {
 
 // ================= Android Native Back Interceptor =================
 window.handleAppBack = function() {
+  const active = document.activeElement;
+  if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
+    active.blur();
+    return true;
+  }
   if (window.isDrawerOpen) {
     closeDrawer();
     return true;

@@ -178,21 +178,6 @@ class MainActivity : ComponentActivity() {
         }
         applyImmersiveFullScreen()
 
-        @Suppress("DEPRECATION")
-        window.decorView.setOnSystemUiVisibilityChangeListener { visibility ->
-            if ((visibility and View.SYSTEM_UI_FLAG_FULLSCREEN) == 0) {
-                // Android can clear fullscreen flags when the IME opens. Re-hiding system bars
-                // immediately here dismisses the keyboard on some WebView/Android combinations.
-                window.decorView.postDelayed({
-                    val imeVisible = ViewCompat.getRootWindowInsets(window.decorView)
-                        ?.isVisible(WindowInsetsCompat.Type.ime()) == true
-                    if (!imeVisible && !isFinishing && customView == null) {
-                        applyImmersiveFullScreen()
-                    }
-                }, 300L)
-            }
-        }
-
         // Initialize Notification Channel and FCM
         MyFirebaseMessagingService.createNotificationChannel(this)
         requestNotificationPermission()
@@ -418,6 +403,11 @@ class MainActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
             setBackgroundColor(Color.BLACK)
+            isFocusable = true
+            isFocusableInTouchMode = true
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES
+            }
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
@@ -1086,8 +1076,32 @@ class MainActivity : ComponentActivity() {
                 } else if (customView != null) {
                     webView.webChromeClient?.onHideCustomView()
                 } else {
-                    webView.evaluateJavascript("if(window.handleAppBack && window.handleAppBack()){ true; } else if(window.historyStack && window.historyStack.length > 0){ window.goBack(); true; } else { false; }") { result ->
-                        if (result == "false" || result == null) {
+                    // Check if soft keyboard is currently open
+                    val imeVisible = ViewCompat.getRootWindowInsets(window.decorView)
+                        ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+                    if (imeVisible) {
+                        // User pressed back while keyboard is open:
+                        // Just hide the keyboard, DO NOT close modal or navigate away!
+                        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+                        insetsController.hide(WindowInsetsCompat.Type.ime())
+                        return
+                    }
+
+                    // Check if active element in WebView is an input/textarea
+                    webView.evaluateJavascript(
+                        "(function() { " +
+                        "  var active = document.activeElement; " +
+                        "  if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) { " +
+                        "    active.blur(); " +
+                        "    return 'blurred'; " +
+                        "  } " +
+                        "  if (window.handleAppBack && window.handleAppBack()) { return 'handled'; } " +
+                        "  if (window.historyStack && window.historyStack.length > 0) { window.goBack(); return 'goback'; } " +
+                        "  return 'none'; " +
+                        "})()"
+                    ) { result ->
+                        val cleanResult = result?.replace("\"", "") ?: "none"
+                        if (cleanResult == "none") {
                             isEnabled = false
                             onBackPressedDispatcher.onBackPressed()
                             isEnabled = true
@@ -1121,7 +1135,7 @@ class MainActivity : ComponentActivity() {
         val density = resources.displayMetrics.density
         playerTopBar.setPadding(
             (16 * density).toInt(),
-            (16 * density).toInt(),
+            (14 * density).toInt(),
             (16 * density).toInt(),
             (12 * density).toInt()
         )
@@ -1147,16 +1161,6 @@ class MainActivity : ComponentActivity() {
             insetsController.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             insetsController.hide(WindowInsetsCompat.Type.systemBars())
-
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility = (
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                or View.SYSTEM_UI_FLAG_FULLSCREEN
-            )
         }
     }
 
